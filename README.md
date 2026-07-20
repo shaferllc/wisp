@@ -35,6 +35,17 @@ permission.
   opacity sliders — changes apply live
 - Settings persist as JSON in `~/Library/Application Support/Wisp/`
 
+## Install
+
+Download `Wisp-<version>.zip` from the
+[latest release](https://github.com/shaferllc/wisp/releases/latest), unzip,
+and drag `Wisp.app` to `/Applications`. The app is ad-hoc signed (not
+notarized), so on first launch right-click → Open, or clear quarantine:
+
+```
+xattr -d com.apple.quarantine /Applications/Wisp.app
+```
+
 ## Build
 
 ```
@@ -42,7 +53,18 @@ permission.
 ```
 
 Builds a release binary, generates the icon, assembles `Wisp.app`, installs
-to `/Applications`, and launches it.
+to `/Applications`, and launches it. `./make-app.sh --dist` instead packages
+`dist/Wisp-<version>.zip` (used by CI).
+
+## Tests & releases
+
+`swift test` runs the settings/persistence test suite; CI runs it on every
+push and pull request. Pushing a tag like `v0.2` builds the app, packages
+the zip, and publishes a GitHub release automatically.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
 
 ## Permissions
 

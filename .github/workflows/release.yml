@@ -1,0 +1,40 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test
+        run: swift test
+
+      - name: Build app bundle
+        run: VERSION="${GITHUB_REF_NAME#v}" ./make-app.sh --dist
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/Wisp-*.zip \
+            --title "Wisp $GITHUB_REF_NAME" \
+            --notes-file - <<'NOTES'
+          Cursor highlight ring that never shows up in screenshots, screen
+          recordings, or screen sharing.
+
+          **Install:** unzip and drag `Wisp.app` to `/Applications`.
+
+          The app is ad-hoc signed (not notarized), so on first launch
+          right-click → Open, or clear quarantine:
+
+          ```
+          xattr -d com.apple.quarantine /Applications/Wisp.app
+          ```
+          NOTES

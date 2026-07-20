@@ -1,6 +1,14 @@
 #!/bin/bash
+# Usage:
+#   ./make-app.sh          build, install to /Applications, and launch
+#   ./make-app.sh --dist   build dist/Wisp.app and dist/Wisp-<version>.zip (CI)
+# VERSION=x.y.z overrides the bundle version (defaults to 0.1).
 set -euo pipefail
 cd "$(dirname "$0")"
+
+DIST=0
+[ "${1:-}" = "--dist" ] && DIST=1
+SHORT_VERSION="${VERSION:-0.1}"
 
 echo "› Building release binary…"
 swift build -c release
@@ -17,7 +25,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/Wisp "$APP/Contents/MacOS/Wisp"
 cp AppIcon.icns        "$APP/Contents/Resources/AppIcon.icns"
 
-cat > "$APP/Contents/Info.plist" <<'PLIST'
+cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -26,7 +34,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleDisplayName</key>          <string>Wisp</string>
     <key>CFBundleIdentifier</key>           <string>com.tomshafer.wisp</string>
     <key>CFBundleVersion</key>              <string>1</string>
-    <key>CFBundleShortVersionString</key>   <string>0.1</string>
+    <key>CFBundleShortVersionString</key>   <string>${SHORT_VERSION}</string>
     <key>CFBundleExecutable</key>           <string>Wisp</string>
     <key>CFBundlePackageType</key>          <string>APPL</string>
     <key>CFBundleSupportedPlatforms</key>   <array><string>MacOSX</string></array>
@@ -43,12 +51,22 @@ PLIST
 xattr -cr "$APP" 2>/dev/null || true
 codesign --force --sign - "$APP" >/dev/null 2>&1 || true
 
-DEST="/Applications/Wisp.app"
-echo "› Installing to $DEST"
-/usr/bin/pkill -x Wisp 2>/dev/null || true
-/bin/sleep 0.3
-rm -rf "$DEST"
-/bin/mv "$APP" "$DEST"
-rm -rf "$STAGE"
-open "$DEST"
-echo "› Installed and launched: $DEST"
+if [ "$DIST" = "1" ]; then
+  echo "› Packaging dist/Wisp-${SHORT_VERSION}.zip"
+  rm -rf dist
+  mkdir -p dist
+  /bin/mv "$APP" dist/Wisp.app
+  rm -rf "$STAGE"
+  /usr/bin/ditto -c -k --keepParent dist/Wisp.app "dist/Wisp-${SHORT_VERSION}.zip"
+  echo "› Packaged: dist/Wisp-${SHORT_VERSION}.zip"
+else
+  DEST="/Applications/Wisp.app"
+  echo "› Installing to $DEST"
+  /usr/bin/pkill -x Wisp 2>/dev/null || true
+  /bin/sleep 0.3
+  rm -rf "$DEST"
+  /bin/mv "$APP" "$DEST"
+  rm -rf "$STAGE"
+  open "$DEST"
+  echo "› Installed and launched: $DEST"
+fi

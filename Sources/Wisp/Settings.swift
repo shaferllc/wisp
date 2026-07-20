@@ -53,15 +53,19 @@ final class SettingsStore: ObservableObject {
         var ringColor: RingColor
     }
 
-    private static var fileURL: URL {
+    /// Where settings live; tests pass a temporary URL instead.
+    nonisolated static var defaultFileURL: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Wisp", isDirectory: true)
             .appendingPathComponent("settings.json")
     }
 
-    static func load() -> SettingsStore {
+    private var fileURL = SettingsStore.defaultFileURL
+
+    static func load(from url: URL = defaultFileURL) -> SettingsStore {
         let store = SettingsStore()
-        if let data = try? Data(contentsOf: fileURL),
+        store.fileURL = url
+        if let data = try? Data(contentsOf: url),
            let p = try? JSONDecoder().decode(Persisted.self, from: data) {
             store.ringEnabled = p.ringEnabled
             store.pulseOnClick = p.pulseOnClick
@@ -86,6 +90,13 @@ final class SettingsStore: ObservableObject {
         }
     }
 
+    /// Writes immediately, cancelling any pending debounced save. The app
+    /// only saves via the debounce; tests call this to flush deterministically.
+    func saveNow() {
+        saveScheduled = false
+        save()
+    }
+
     private func save() {
         let p = Persisted(ringEnabled: ringEnabled, pulseOnClick: pulseOnClick,
                           diameter: diameter, thickness: thickness,
@@ -93,10 +104,9 @@ final class SettingsStore: ObservableObject {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(p) else { return }
-        let url = Self.fileURL
-        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+        try? FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(),
                                                  withIntermediateDirectories: true)
-        try? data.write(to: url, options: .atomic)
+        try? data.write(to: fileURL, options: .atomic)
     }
 }
 

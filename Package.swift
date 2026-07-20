@@ -9,5 +9,10 @@ let package = Package(
             name: "Wisp",
             path: "Sources/Wisp"
         ),
+        .testTarget(
+            name: "WispTests",
+            dependencies: ["Wisp"],
+            path: "Tests/WispTests"
+        ),
     ]
 )

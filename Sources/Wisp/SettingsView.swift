@@ -89,6 +89,10 @@ final class SettingsWindowController {
                              backing: .buffered, defer: false)
             w.title = "Wisp Settings"
             w.isReleasedWhenClosed = false
+            // As an accessory app, activation can be declined (macOS 14
+            // cooperative activation) and the window would open behind the
+            // frontmost app — follow the user to the active Space instead.
+            w.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
             w.contentView = NSHostingView(rootView: SettingsView(store: store))
             w.setContentSize(NSSize(width: 400, height: 380))
             w.center()
@@ -96,5 +100,8 @@ final class SettingsWindowController {
         }
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
+        // If activation was declined, makeKeyAndOrderFront alone leaves the
+        // window behind the active app — force it front anyway.
+        window?.orderFrontRegardless()
     }
 }

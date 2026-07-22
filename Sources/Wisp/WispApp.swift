@@ -1,5 +1,5 @@
 import AppKit
-import Carbon.HIToolbox
+import Combine
 import SwiftUI
 
 @main
@@ -21,28 +21,57 @@ struct WispApp {
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var settings: SettingsStore!
     private var overlay: OverlayController!
+    private var keystrokes: KeystrokeHUD!
     private var statusItem: NSStatusItem!
-    private var hotKey: HotKey?
     private var settingsWindow: SettingsWindowController!
+    private var cancellables = Set<AnyCancellable>()
 
     private let toggleItem = NSMenuItem()
+    private let spotlightItem = NSMenuItem()
     private let pulseItem = NSMenuItem()
+    private let trailItem = NSMenuItem()
+    private let idleItem = NSMenuItem()
+
+    /// What the hot keys are currently bound to, so a settings change only
+    /// re-registers when the combo actually changed.
+    private var boundRingHotKey: KeyCombo?
+    private var boundSpotlightHotKey: KeyCombo?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         settings = SettingsStore.load()
+        settings.launchAtLogin = LoginItem.isEnabled
         settingsWindow = SettingsWindowController(store: settings)
 
         overlay = OverlayController(settings: settings)
         OverlayController.shared = overlay
 
-        buildStatusItem()
+        keystrokes = KeystrokeHUD(settings: settings)
+        KeystrokeHUD.shared = keystrokes
 
-        // ⌥⌘W toggles the ring from anywhere. Carbon delivers the callback on
-        // the main thread.
-        hotKey = HotKey(keyCode: UInt32(kVK_ANSI_W),
-                        modifiers: UInt32(cmdKey | optionKey)) {
-            MainActor.assumeIsolated {
+        buildStatusItem()
+        syncHotKeys()
+
+        settings.objectWillChange
+            .receive(on: RunLoop.main)   // wait until the new value has landed
+            .sink { [weak self] _ in self?.syncHotKeys() }
+            .store(in: &cancellables)
+    }
+
+    // MARK: - Hot keys
+
+    private func syncHotKeys() {
+        if boundRingHotKey != settings.ringHotKey {
+            boundRingHotKey = settings.ringHotKey
+            HotKeyCenter.shared.note(.toggleRing, combo: settings.ringHotKey)
+            HotKeyCenter.shared.register(.toggleRing, combo: settings.ringHotKey) {
                 retainedDelegate?.toggleRing(nil)
+            }
+        }
+        if boundSpotlightHotKey != settings.spotlightHotKey {
+            boundSpotlightHotKey = settings.spotlightHotKey
+            HotKeyCenter.shared.note(.toggleSpotlight, combo: settings.spotlightHotKey)
+            HotKeyCenter.shared.register(.toggleSpotlight, combo: settings.spotlightHotKey) {
+                retainedDelegate?.toggleSpotlight(nil)
             }
         }
     }
@@ -59,15 +88,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         toggleItem.title = "Hide Ring"
         toggleItem.action = #selector(toggleRing(_:))
-        toggleItem.keyEquivalent = "w"
-        toggleItem.keyEquivalentModifierMask = [.command, .option]
         toggleItem.target = self
         menu.addItem(toggleItem)
+
+        spotlightItem.title = "Spotlight"
+        spotlightItem.action = #selector(toggleSpotlight(_:))
+        spotlightItem.target = self
+        menu.addItem(spotlightItem)
+
+        menu.addItem(.separator())
 
         pulseItem.title = "Highlight on Click"
         pulseItem.action = #selector(togglePulse(_:))
         pulseItem.target = self
         menu.addItem(pulseItem)
+
+        trailItem.title = "Cursor Trail"
+        trailItem.action = #selector(toggleTrail(_:))
+        trailItem.target = self
+        menu.addItem(trailItem)
+
+        idleItem.title = "Fade When Idle"
+        idleItem.action = #selector(toggleIdle(_:))
+        idleItem.target = self
+        menu.addItem(idleItem)
 
         menu.addItem(.separator())
 
@@ -89,7 +133,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         toggleItem.title = settings.ringEnabled ? "Hide Ring" : "Show Ring"
+        // Mirror the user's own shortcuts, which are rebindable.
+        toggleItem.keyEquivalent = Self.menuKeyEquivalent(settings.ringHotKey)
+        toggleItem.keyEquivalentModifierMask = settings.ringHotKey.eventModifiers
+        spotlightItem.state = settings.spotlightEnabled ? .on : .off
+        spotlightItem.keyEquivalent = Self.menuKeyEquivalent(settings.spotlightHotKey)
+        spotlightItem.keyEquivalentModifierMask = settings.spotlightHotKey.eventModifiers
         pulseItem.state = settings.pulseOnClick ? .on : .off
+        trailItem.state = settings.trailEnabled ? .on : .off
+        idleItem.state = settings.idleHideEnabled ? .on : .off
+    }
+
+    /// Menu key equivalents are characters, not virtual key codes; anything
+    /// without a plain character (arrows, function keys) simply shows no
+    /// shortcut in the menu even though the global hot key still works.
+    private static func menuKeyEquivalent(_ combo: KeyCombo) -> String {
+        let name = KeyCombo.keyName(combo.keyCode)
+        guard name.count == 1 else { return "" }
+        return name.lowercased()
     }
 
     // MARK: - Actions
@@ -98,8 +159,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settings.ringEnabled.toggle()
     }
 
+    @objc func toggleSpotlight(_ sender: Any?) {
+        settings.spotlightEnabled.toggle()
+    }
+
     @objc func togglePulse(_ sender: Any?) {
         settings.pulseOnClick.toggle()
+    }
+
+    @objc func toggleTrail(_ sender: Any?) {
+        settings.trailEnabled.toggle()
+    }
+
+    @objc func toggleIdle(_ sender: Any?) {
+        settings.idleHideEnabled.toggle()
     }
 
     @objc func openSettings(_ sender: Any?) {

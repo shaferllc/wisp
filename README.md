@@ -13,7 +13,8 @@ AppKit, SwiftPM, `make-app.sh`, no Xcode project, no external dependencies,
 ## The trick
 
 The ring lives in a borderless, transparent, click-through overlay window
-with `window.sharingType = .none`. That one property excludes the window from
+spanning the union of every screen, with `window.sharingType = .none`. That one
+property excludes the window from
 every capture path on macOS — CGWindowList captures, ScreenCaptureKit, the
 system screenshot UI, and screen sharing — so the ring exists only on your
 physical display. Pointer tracking uses a global `NSEvent` mouse-move
@@ -22,18 +23,33 @@ permission.
 
 ## Features
 
-- Soft glowing ring that follows the pointer, across all displays and Spaces
-  (including over full-screen apps)
+- Soft glowing marker that follows the pointer, across all displays and Spaces
+  (including over full-screen apps), in four styles: ring, double ring, dot,
+  crosshair
 - Invisible to screenshots, recordings, and screen sharing (`sharingType = .none`)
-- Click-through: the ring never intercepts a mouse event
+- Click-through: the overlay never intercepts a mouse event
 - **Highlight on click**: an expanding pulse flashes from the ring on mouse
   down (toggleable)
-- Global hotkey **⌥⌘W** to show/hide the ring from anywhere (Carbon
-  `RegisterEventHotKey` — tiny, no dependencies)
-- Menu bar app (no Dock icon): toggle ring, toggle click pulse, Settings
-- Settings: five color presets + custom color picker, size / thickness /
-  opacity sliders — changes apply live
-- Settings persist as JSON in `~/Library/Application Support/Wisp/`
+- **Spotlight**: dims the whole desktop except a soft-edged circle around the
+  pointer — and, like the ring, only on your display. Radius, softness, and
+  dimming are adjustable; **⌥⌘S** toggles it.
+- **Cursor trail**: fading ghosts follow fast pointer movements, so the eye can
+  catch up with a flick across the screen
+- **Fade when idle**: the marker dims away after a quiet spell and returns the
+  moment you move — the spotlight is deliberately left alone
+- **Rebindable global hotkeys** for ring and spotlight (Carbon
+  `RegisterEventHotKey` — tiny, no dependencies). The recorder rejects a
+  shortcut that has no real modifier or that another app already owns.
+- **Launch at login** via `SMAppService` — no helper bundle, no login-item plist
+- **Keystroke display** (opt-in): shows the keys you press in a HUD. This one
+  is for your *audience*, so it defaults to being visible in recordings — see
+  [Permissions](#permissions).
+- Menu bar app (no Dock icon): toggle ring, spotlight, click pulse, trail, and
+  idle fade; Settings
+- Settings in five panes — Ring, Motion, Spotlight, Keyboard, General — with
+  five color presets plus a custom picker; changes apply live
+- Settings persist as JSON in `~/Library/Application Support/Wisp/`, and a file
+  written by an older Wisp still loads (missing keys fall back to defaults)
 
 ## Install
 
@@ -68,6 +84,17 @@ MIT — see [LICENSE](LICENSE).
 
 ## Permissions
 
-None. Mouse-move monitoring does not require Accessibility, the overlay
-draws in Wisp's own window, and the hotkey uses the Carbon API — so Wisp
-never triggers a permission prompt.
+None, for everything above except one opt-in extra. Mouse-move monitoring does
+not require Accessibility, the overlay draws in Wisp's own window, and the
+hotkeys use the Carbon API — so out of the box Wisp never triggers a
+permission prompt.
+
+The sole exception is **keystroke display**. Reading keys pressed in *other*
+apps needs a global keyboard monitor, and macOS gates those behind
+Accessibility. It ships off; nothing is registered and no prompt appears until
+you switch it on in Settings › Keyboard. Turn it back off and the monitor is
+torn down.
+
+Note the deliberate inversion there: the ring is for you, so it is hidden from
+capture, but a keystroke HUD is for your audience, so by default it *is*
+captured. A second switch flips it back to display-only.

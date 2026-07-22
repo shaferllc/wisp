@@ -14,3 +14,35 @@ jobs:
         run: swift build
       - name: Test
         run: swift test
+
+  # Assemble the real .app on every push and PR, not just on a release tag.
+  # `swift build` passing says nothing about whether make-app.sh still works —
+  # icon generation, the Info.plist, and ad-hoc signing are only exercised
+  # here, and a break in any of them used to surface for the first time
+  # halfway through cutting a release.
+  app:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build app bundle
+        run: VERSION="0.0.0-${GITHUB_SHA:0:7}" ./make-app.sh --dist
+
+      - name: Verify the bundle is well formed
+        run: |
+          set -euo pipefail
+          APP=dist/Wisp.app
+          test -x "$APP/Contents/MacOS/Wisp"
+          test -f "$APP/Contents/Resources/AppIcon.icns"
+          plutil -lint "$APP/Contents/Info.plist"
+          # Accessory app: it must never take a Dock icon.
+          plutil -extract LSUIElement raw "$APP/Contents/Info.plist"
+          codesign --verify --deep --strict "$APP"
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Wisp-${{ github.sha }}
+          path: dist/Wisp-*.zip
+          retention-days: 14
+          if-no-files-found: error

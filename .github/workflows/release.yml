@@ -19,17 +19,33 @@ jobs:
       - name: Build app bundle
         run: VERSION="${GITHUB_REF_NAME#v}" ./make-app.sh --dist
 
+      - name: Verify the disk image
+        run: |
+          set -euo pipefail
+          DMG="dist/Wisp-${GITHUB_REF_NAME#v}.dmg"
+          test -f "$DMG"
+          # Mount it the way a downloader would, and confirm the drag-to-install
+          # layout survived packaging: the app plus an /Applications alias.
+          hdiutil attach "$DMG" -nobrowse -quiet -mountpoint /tmp/wispdmg
+          test -x /tmp/wispdmg/Wisp.app/Contents/MacOS/Wisp
+          test -L /tmp/wispdmg/Applications
+          codesign --verify --deep --strict /tmp/wispdmg/Wisp.app
+          hdiutil detach /tmp/wispdmg -quiet
+
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/Wisp-*.zip \
+          gh release create "$GITHUB_REF_NAME" \
+            dist/Wisp-*.dmg dist/Wisp-*.zip \
             --title "Wisp $GITHUB_REF_NAME" \
             --notes-file - <<'NOTES'
           Cursor highlight ring that never shows up in screenshots, screen
           recordings, or screen sharing.
 
-          **Install:** unzip and drag `Wisp.app` to `/Applications`.
+          **Install:** download the `.dmg`, open it, and drag `Wisp.app` to the
+          `Applications` folder beside it. (The `.zip` is the same app, if you
+          prefer it.)
 
           The app is ad-hoc signed (not notarized), so on first launch
           right-click → Open, or clear quarantine:

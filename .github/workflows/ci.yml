@@ -39,10 +39,20 @@ jobs:
           plutil -extract LSUIElement raw "$APP/Contents/Info.plist"
           codesign --verify --deep --strict "$APP"
 
+      - name: Verify the disk image
+        run: |
+          set -euo pipefail
+          hdiutil attach dist/Wisp-*.dmg -nobrowse -quiet -mountpoint /tmp/wispdmg
+          test -x /tmp/wispdmg/Wisp.app/Contents/MacOS/Wisp
+          test -L /tmp/wispdmg/Applications   # the drag-to-install alias
+          hdiutil detach /tmp/wispdmg -quiet
+
       - name: Upload build
         uses: actions/upload-artifact@v4
         with:
           name: Wisp-${{ github.sha }}
-          path: dist/Wisp-*.zip
+          path: |
+            dist/Wisp-*.dmg
+            dist/Wisp-*.zip
           retention-days: 14
           if-no-files-found: error

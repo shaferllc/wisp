@@ -53,10 +53,13 @@ permission.
 
 ## Install
 
-Download `Wisp-<version>.zip` from the
-[latest release](https://github.com/shaferllc/wisp/releases/latest), unzip,
-and drag `Wisp.app` to `/Applications`. The app is ad-hoc signed (not
-notarized), so on first launch right-click → Open, or clear quarantine:
+Download `Wisp-<version>.dmg` from the
+[latest release](https://github.com/shaferllc/wisp/releases/latest), open it,
+and drag `Wisp.app` onto the `Applications` folder beside it. A `.zip` of the
+same app is attached to every release too, if you prefer it.
+
+The app is ad-hoc signed (not notarized), so on first launch right-click →
+Open, or clear quarantine:
 
 ```
 xattr -d com.apple.quarantine /Applications/Wisp.app
@@ -70,13 +73,19 @@ xattr -d com.apple.quarantine /Applications/Wisp.app
 
 Builds a release binary, generates the icon, assembles `Wisp.app`, installs
 to `/Applications`, and launches it. `./make-app.sh --dist` instead packages
-`dist/Wisp-<version>.zip` (used by CI).
+`dist/Wisp-<version>.dmg` and `dist/Wisp-<version>.zip` (used by CI).
 
 ## Tests & releases
 
-`swift test` runs the settings/persistence test suite; CI runs it on every
-push and pull request. Pushing a tag like `v0.2` builds the app, packages
-the zip, and publishes a GitHub release automatically.
+`swift test` runs the settings/persistence test suite. On every push and pull
+request, CI runs it *and* assembles the real `.app` — bundle layout, icon
+generation, and ad-hoc signing are only exercised there, so a packaging break
+can't hide behind a green `swift build`. The disk image is mounted and checked
+too, and both artifacts are downloadable from the run.
+
+Pushing a tag like `v0.2.0` builds the app, packages the DMG and the zip,
+verifies the image mounts with its drag-to-install layout intact, and
+publishes a GitHub release automatically.
 
 ## License
 

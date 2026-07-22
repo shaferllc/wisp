@@ -59,6 +59,21 @@ if [ "$DIST" = "1" ]; then
   rm -rf "$STAGE"
   /usr/bin/ditto -c -k --keepParent dist/Wisp.app "dist/Wisp-${SHORT_VERSION}.zip"
   echo "› Packaged: dist/Wisp-${SHORT_VERSION}.zip"
+
+  # A DMG alongside the zip: it opens to a window holding Wisp.app next to an
+  # /Applications alias, so installing is one drag rather than "unzip, then
+  # find where it went". UDZO is compressed and read-only.
+  echo "› Packaging dist/Wisp-${SHORT_VERSION}.dmg"
+  DMG_ROOT="$(mktemp -d)"
+  /bin/cp -R dist/Wisp.app "$DMG_ROOT/Wisp.app"
+  /bin/ln -s /Applications "$DMG_ROOT/Applications"
+  /usr/bin/hdiutil create \
+    -volname "Wisp ${SHORT_VERSION}" \
+    -srcfolder "$DMG_ROOT" \
+    -fs HFS+ -format UDZO -ov -quiet \
+    "dist/Wisp-${SHORT_VERSION}.dmg"
+  rm -rf "$DMG_ROOT"
+  echo "› Packaged: dist/Wisp-${SHORT_VERSION}.dmg"
 else
   DEST="/Applications/Wisp.app"
   echo "› Installing to $DEST"

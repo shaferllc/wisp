@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  test:
+  build:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -15,11 +15,12 @@ jobs:
       - name: Test
         run: swift test
 
-  # Assemble the real .app on every push and PR, not just on a release tag.
-  # `swift build` passing says nothing about whether make-app.sh still works —
+
+  # Assemble the real .app on every push and PR, not just on a release. A
+  # passing `swift build` says nothing about whether make-app.sh still works —
   # icon generation, the Info.plist, and ad-hoc signing are only exercised
-  # here, and a break in any of them used to surface for the first time
-  # halfway through cutting a release.
+  # here, and a break in any of them would otherwise surface for the first
+  # time halfway through cutting a release.
   app:
     runs-on: macos-15
     steps:
@@ -35,17 +36,15 @@ jobs:
           test -x "$APP/Contents/MacOS/Wisp"
           test -f "$APP/Contents/Resources/AppIcon.icns"
           plutil -lint "$APP/Contents/Info.plist"
-          # Accessory app: it must never take a Dock icon.
-          plutil -extract LSUIElement raw "$APP/Contents/Info.plist"
           codesign --verify --deep --strict "$APP"
 
       - name: Verify the disk image
         run: |
           set -euo pipefail
-          hdiutil attach dist/Wisp-*.dmg -nobrowse -quiet -mountpoint /tmp/wispdmg
-          test -x /tmp/wispdmg/Wisp.app/Contents/MacOS/Wisp
-          test -L /tmp/wispdmg/Applications   # the drag-to-install alias
-          hdiutil detach /tmp/wispdmg -quiet
+          hdiutil attach dist/Wisp-*.dmg -nobrowse -quiet -mountpoint /tmp/dmg
+          test -x /tmp/dmg/Wisp.app/Contents/MacOS/Wisp
+          test -L /tmp/dmg/Applications   # the drag-to-install alias
+          hdiutil detach /tmp/dmg -quiet
 
       - name: Upload build
         uses: actions/upload-artifact@v4

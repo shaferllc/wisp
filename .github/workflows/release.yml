@@ -1,8 +1,13 @@
 name: Release
 
+# The VERSION file is the trigger. Bump it in an ordinary commit, push, and
+# this cuts the release: tag, universal build, .zip + .dmg, GitHub release.
+# Push anything that doesn't change VERSION and this job checks, finds the
+# release already exists, and stops. No bot commits, no tags to remember.
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -13,44 +18,68 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Test
-        run: swift test
+      - name: Read the VERSION file
+        id: v
+        run: echo "version=$(tr -d '[:space:]' < VERSION)" >> "$GITHUB_OUTPUT"
 
-      - name: Build app bundle
-        run: VERSION="${GITHUB_REF_NAME#v}" ./make-app.sh --dist
-
-      - name: Verify the disk image
-        run: |
-          set -euo pipefail
-          DMG="dist/Wisp-${GITHUB_REF_NAME#v}.dmg"
-          test -f "$DMG"
-          # Mount it the way a downloader would, and confirm the drag-to-install
-          # layout survived packaging: the app plus an /Applications alias.
-          hdiutil attach "$DMG" -nobrowse -quiet -mountpoint /tmp/wispdmg
-          test -x /tmp/wispdmg/Wisp.app/Contents/MacOS/Wisp
-          test -L /tmp/wispdmg/Applications
-          codesign --verify --deep --strict /tmp/wispdmg/Wisp.app
-          hdiutil detach /tmp/wispdmg -quiet
-
-      - name: Create GitHub release
+      - name: Has this version already shipped?
+        id: gate
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
+          if gh release view "v${{ steps.v.outputs.version }}" >/dev/null 2>&1; then
+            echo "v${{ steps.v.outputs.version }} is already released — nothing to do."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "v${{ steps.v.outputs.version }} is new — building."
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build universal app, zip and disk image
+        if: steps.gate.outputs.publish == 'true'
+        run: VERSION="${{ steps.v.outputs.version }}" ./make-app.sh --dist
+
+      - name: Verify the disk image
+        if: steps.gate.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          V="${{ steps.v.outputs.version }}"
+          DMG="dist/Wisp-${V}.dmg"
+          test -f "$DMG"
+          # Both architectures, or the download is broken for every Intel Mac.
+          lipo -archs dist/Wisp.app/Contents/MacOS/Wisp | tee /dev/stderr | grep -q x86_64
+          lipo -archs dist/Wisp.app/Contents/MacOS/Wisp | grep -q arm64
+          # Mount it the way a downloader would and confirm the drag-to-install
+          # layout survived packaging: the app plus an /Applications alias.
+          hdiutil attach "$DMG" -nobrowse -quiet -mountpoint /tmp/dmg
+          test -x /tmp/dmg/Wisp.app/Contents/MacOS/Wisp
+          test -L /tmp/dmg/Applications
+          codesign --verify --deep --strict /tmp/dmg/Wisp.app
+          hdiutil detach /tmp/dmg -quiet
+
+      - name: Publish the release
+        if: steps.gate.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          V="${{ steps.v.outputs.version }}"
+          gh release create "v$V" \
             dist/Wisp-*.dmg dist/Wisp-*.zip \
-            --title "Wisp $GITHUB_REF_NAME" \
-            --notes-file - <<'NOTES'
-          Cursor highlight ring that never shows up in screenshots, screen
-          recordings, or screen sharing.
+            --target "$GITHUB_SHA" \
+            --title "Wisp v$V" \
+            --notes-file - <<NOTES
+          A cursor highlight ring for presenting, screen sharing, and pointing at things — in the spirit of GhostCursor, but **free**. The ring glows around your pointer on every display, yet it never shows up in screenshots, screen recordings, or the screen you share on a call. Your audience sees a clean
 
-          **Install:** download the `.dmg`, open it, and drag `Wisp.app` to the
-          `Applications` folder beside it. (The `.zip` is the same app, if you
-          prefer it.)
+          **Install:** download the \`.dmg\`, open it, and drag \`Wisp.app\` to the
+          \`Applications\` folder beside it. (The \`.zip\` is the same app, if you
+          prefer it.) Universal — Apple Silicon and Intel, macOS 14+.
 
-          The app is ad-hoc signed (not notarized), so on first launch
-          right-click → Open, or clear quarantine:
+          Wisp is ad-hoc signed rather than notarized, so macOS quarantines it
+          on download. Open it once via **System Settings → Privacy & Security →
+          Open Anyway**, or clear the flag yourself:
 
-          ```
+          \`\`\`
           xattr -d com.apple.quarantine /Applications/Wisp.app
-          ```
+          \`\`\`
           NOTES

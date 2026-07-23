@@ -1,17 +1,29 @@
 #!/bin/bash
 # Usage:
-#   ./make-app.sh          build, install to /Applications, and launch
-#   ./make-app.sh --dist   build dist/Wisp.app and dist/Wisp-<version>.zip (CI)
-# VERSION=x.y.z overrides the bundle version (defaults to 0.1).
+#   ./make-app.sh          build for this Mac, install to /Applications, launch
+#   ./make-app.sh --dist   build a universal dist/Wisp.app plus a .zip and .dmg
+#
+# The version comes from the VERSION file; VERSION=x.y.z in the environment
+# overrides it, which is how the release workflow stamps a build.
 set -euo pipefail
 cd "$(dirname "$0")"
 
 DIST=0
 [ "${1:-}" = "--dist" ] && DIST=1
-SHORT_VERSION="${VERSION:-0.1}"
+SHORT_VERSION="${VERSION:-$(tr -d '[:space:]' < VERSION 2>/dev/null || echo 0.1.0)}"
 
-echo "› Building release binary…"
-swift build -c release
+if [ "$DIST" = "1" ]; then
+  # Anything people download has to run on both architectures — an arm64-only
+  # binary is a broken download for every Intel Mac. The local install path
+  # stays single-arch because it only ever has to run on this machine.
+  echo "› Building universal release binary…"
+  swift build -c release --arch arm64 --arch x86_64
+  BINARY=".build/apple/Products/Release/Wisp"
+else
+  echo "› Building release binary…"
+  swift build -c release
+  BINARY=".build/release/Wisp"
+fi
 
 if [ ! -f AppIcon.icns ] || [ make-icon.swift -nt AppIcon.icns ]; then
   echo "› Generating AppIcon.icns…"
@@ -22,8 +34,8 @@ STAGE="$(mktemp -d)"
 APP="$STAGE/Wisp.app"
 echo "› Assembling in staging: $APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp .build/release/Wisp "$APP/Contents/MacOS/Wisp"
-cp AppIcon.icns        "$APP/Contents/Resources/AppIcon.icns"
+cp "$BINARY"     "$APP/Contents/MacOS/Wisp"
+cp AppIcon.icns  "$APP/Contents/Resources/AppIcon.icns"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -52,13 +64,13 @@ xattr -cr "$APP" 2>/dev/null || true
 codesign --force --sign - "$APP" >/dev/null 2>&1 || true
 
 if [ "$DIST" = "1" ]; then
-  echo "› Packaging dist/Wisp-${SHORT_VERSION}.zip"
   rm -rf dist
   mkdir -p dist
   /bin/mv "$APP" dist/Wisp.app
   rm -rf "$STAGE"
+
+  echo "› Packaging dist/Wisp-${SHORT_VERSION}.zip"
   /usr/bin/ditto -c -k --keepParent dist/Wisp.app "dist/Wisp-${SHORT_VERSION}.zip"
-  echo "› Packaged: dist/Wisp-${SHORT_VERSION}.zip"
 
   # A DMG alongside the zip: it opens to a window holding Wisp.app next to an
   # /Applications alias, so installing is one drag rather than "unzip, then

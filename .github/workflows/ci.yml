@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - name: Build
@@ -22,7 +22,7 @@ jobs:
   # here, and a break in any of them would otherwise surface for the first
   # time halfway through cutting a release.
   app:
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
 

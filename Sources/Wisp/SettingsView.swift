@@ -4,19 +4,30 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var store: SettingsStore
+    /// In UserDefaults so the app can open straight to a pane — the Account tab
+    /// after a registration handoff — by writing the key before showing.
+    @AppStorage("settingsTab") private var tab = "ring"
 
     var body: some View {
-        TabView {
+        TabView(selection: $tab) {
             RingSettings(store: store)
                 .tabItem { Label("Ring", systemImage: "circle.dashed") }
+                .tag("ring")
             MotionSettings(store: store)
                 .tabItem { Label("Motion", systemImage: "waveform.path.ecg") }
+                .tag("motion")
             SpotlightSettings(store: store)
                 .tabItem { Label("Spotlight", systemImage: "sun.max") }
+                .tag("spotlight")
             KeyboardSettings(store: store)
                 .tabItem { Label("Keyboard", systemImage: "keyboard") }
+                .tag("keyboard")
             GeneralSettings(store: store)
                 .tabItem { Label("General", systemImage: "gearshape") }
+                .tag("general")
+            AccountSettings()
+                .tabItem { Label("Account", systemImage: "person.crop.circle") }
+                .tag("account")
         }
         .frame(width: 460, height: 430)
     }

@@ -1,9 +1,9 @@
 name: Release
 
 # The VERSION file is the trigger. Bump it in an ordinary commit, push, and
-# this cuts the release: tag, universal build, .zip + .dmg, GitHub release.
-# Push anything that doesn't change VERSION and this job checks, finds the
-# release already exists, and stops. No bot commits, no tags to remember.
+# this cuts the release: tag, universal build, notarization, .zip + .dmg,
+# GitHub release. Push anything that doesn't change VERSION and this job
+# checks, finds the release already exists, and stops.
 on:
   push:
     branches: [main]
@@ -35,9 +35,21 @@ jobs:
             echo "publish=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build universal app, zip and disk image
+      # Releases don't ship unnotarized: a missing secret fails here instead of
+      # publishing an ad-hoc build. The cert lives in a throwaway keychain.
+      - name: Load Developer ID certificate and notary key
         if: steps.gate.outputs.publish == 'true'
-        run: VERSION="${{ steps.v.outputs.version }}" ./make-app.sh --dist
+        env:
+          CERT_P12: ${{ secrets.DEVELOPER_ID_P12 }}
+          CERT_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          NOTARY_KEY: ${{ secrets.NOTARY_API_KEY }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.NOTARY_API_ISSUER }}
+        run: ./.github/load-signing.sh
+
+      - name: Build, sign and notarize universal app, zip and disk image
+        if: steps.gate.outputs.publish == 'true'
+        run: NOTARY_PROFILE=wisp VERSION="${{ steps.v.outputs.version }}" ./make-app.sh --dist
 
       - name: Verify the disk image
         if: steps.gate.outputs.publish == 'true'
@@ -52,10 +64,17 @@ jobs:
           # Mount it the way a downloader would and confirm the drag-to-install
           # layout survived packaging: the app plus an /Applications alias.
           hdiutil attach "$DMG" -nobrowse -quiet -mountpoint /tmp/dmg
-          test -x /tmp/dmg/Wisp.app/Contents/MacOS/Wisp
+          APP=/tmp/dmg/Wisp.app
+          test -x "$APP/Contents/MacOS/Wisp"
           test -L /tmp/dmg/Applications
-          codesign --verify --deep --strict /tmp/dmg/Wisp.app
+          codesign --verify --deep --strict "$APP"
+          # Authority lines only print at -dvv.
+          codesign -dvv "$APP" 2>&1 | grep -q "Authority=Developer ID Application"
+          # Stapled tickets are what let it open offline without a Gatekeeper prompt.
+          xcrun stapler validate "$APP"
+          spctl --assess --type execute --verbose "$APP"
           hdiutil detach /tmp/dmg -quiet
+          xcrun stapler validate "$DMG"
 
       - name: Publish the release
         if: steps.gate.outputs.publish == 'true'
@@ -64,22 +83,18 @@ jobs:
         run: |
           set -euo pipefail
           V="${{ steps.v.outputs.version }}"
+          # A stable-named copy too, so releases/latest/download/Wisp.dmg (what
+          # the website links to) works across version bumps.
+          cp "dist/Wisp-${V}.dmg" dist/Wisp.dmg
           gh release create "v$V" \
-            dist/Wisp-*.dmg dist/Wisp-*.zip \
+            dist/Wisp-*.dmg dist/Wisp.dmg dist/Wisp-*.zip \
             --target "$GITHUB_SHA" \
             --title "Wisp v$V" \
             --notes-file - <<NOTES
-          A cursor highlight ring for presenting, screen sharing, and pointing at things — in the spirit of GhostCursor, but **free**. The ring glows around your pointer on every display, yet it never shows up in screenshots, screen recordings, or the screen you share on a call. Your audience sees a clean
+          A cursor highlight ring for presenting, screen sharing, and pointing at things — in the spirit of GhostCursor, but **free**. The ring glows around your pointer on every display, yet it never shows up in screenshots, screen recordings, or the screen you share on a call. Your audience sees a clean screen; you see exactly where your cursor is.
 
           **Install:** download the \`.dmg\`, open it, and drag \`Wisp.app\` to the
           \`Applications\` folder beside it. (The \`.zip\` is the same app, if you
-          prefer it.) Universal — Apple Silicon and Intel, macOS 14+.
-
-          Wisp is ad-hoc signed rather than notarized, so macOS quarantines it
-          on download. Open it once via **System Settings → Privacy & Security →
-          Open Anyway**, or clear the flag yourself:
-
-          \`\`\`
-          xattr -d com.apple.quarantine /Applications/Wisp.app
-          \`\`\`
+          prefer it.) Universal — Apple Silicon and Intel, macOS 14+. Signed with
+          a Developer ID and notarized by Apple, so it opens normally.
           NOTES

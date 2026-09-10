@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import Combine
 import SwiftUI
 
@@ -37,6 +38,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var boundRingHotKey: KeyCombo?
     private var boundSpotlightHotKey: KeyCombo?
 
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // shafer.llc hands registration keys back as wisp://activate?…
+        // Registering before launch finishes also catches a URL that launched
+        // the app.
+        NSAppleEventManager.shared().setEventHandler(
+            self, andSelector: #selector(handleGetURL(_:withReply:)),
+            forEventClass: AEEventClass(kInternetEventClass), andEventID: AEEventID(kAEGetURL))
+    }
+
+    @objc private func handleGetURL(_ event: NSAppleEventDescriptor, withReply reply: NSAppleEventDescriptor) {
+        guard let string = event.paramDescriptor(forKeyword: AEKeyword(keyDirectObject))?.stringValue,
+              let url = URL(string: string) else { return }
+        LicenseModel.shared.handle(url)
+        // A menu-bar app has nothing on screen to show the result, so open
+        // Settings on the Account tab, where "Checking…" turns into "Registered".
+        UserDefaults.standard.set("account", forKey: "settingsTab")
+        settingsWindow?.show()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         settings = SettingsStore.load()
         settings.launchAtLogin = LoginItem.isEnabled
@@ -50,6 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         buildStatusItem()
         syncHotKeys()
+        LicenseModel.shared.startRechecking()
 
         settings.objectWillChange
             .receive(on: RunLoop.main)   // wait until the new value has landed

@@ -18,16 +18,18 @@ jobs:
 
   # Assemble the real .app on every push and PR, not just on a release. A
   # passing `swift build` says nothing about whether make-app.sh still works —
-  # icon generation, the Info.plist, and ad-hoc signing are only exercised
-  # here, and a break in any of them would otherwise surface for the first
-  # time halfway through cutting a release.
+  # icon generation, the Info.plist, and signing are only exercised here, and a
+  # break in any of them would otherwise surface for the first time halfway
+  # through cutting a release.
   app:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
 
+      # SIGN_IDENTITY= forces ad-hoc: this job covers the no-certificate path;
+      # the signing job below covers the credentials.
       - name: Build app bundle
-        run: VERSION="0.0.0-${GITHUB_SHA:0:7}" ./make-app.sh --dist
+        run: SIGN_IDENTITY= VERSION="0.0.0-${GITHUB_SHA:0:7}" ./make-app.sh --dist
 
       - name: Verify the bundle is well formed
         run: |
@@ -36,6 +38,8 @@ jobs:
           test -x "$APP/Contents/MacOS/Wisp"
           test -f "$APP/Contents/Resources/AppIcon.icns"
           plutil -lint "$APP/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleURLTypes:0:CFBundleURLSchemes:0" \
+            "$APP/Contents/Info.plist" | grep -qx wisp
           codesign --verify --deep --strict "$APP"
 
       - name: Verify the disk image
@@ -55,3 +59,25 @@ jobs:
             dist/Wisp-*.zip
           retention-days: 14
           if-no-files-found: error
+
+  # Proves the org signing secrets work (the cert imports, Apple accepts the
+  # notary key) without building or publishing anything, so a release never
+  # finds out first. Skipped until the secrets exist, and on fork PRs, which
+  # never see them.
+  signing:
+    runs-on: macos-26
+    env:
+      CERT_P12: ${{ secrets.DEVELOPER_ID_P12 }}
+      CERT_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+      NOTARY_KEY: ${{ secrets.NOTARY_API_KEY }}
+      NOTARY_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
+      NOTARY_ISSUER: ${{ secrets.NOTARY_API_ISSUER }}
+    steps:
+      - uses: actions/checkout@v4
+        if: env.CERT_P12 != ''
+      - name: Load certificate and verify notary credentials
+        if: env.CERT_P12 != ''
+        run: ./.github/load-signing.sh
+      - name: No signing secrets yet
+        if: env.CERT_P12 == ''
+        run: echo "::notice::DEVELOPER_ID_P12 isn't set; skipping the credential check."

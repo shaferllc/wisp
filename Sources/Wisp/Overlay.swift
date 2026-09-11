@@ -2,24 +2,32 @@ import AppKit
 import Combine
 import QuartzCore
 
-/// Owns the transparent, click-through overlay window that draws the pointer
+/// Owns the transparent, click-through overlay windows that draw the pointer
 /// marker, its trail, the click pulse, and the spotlight dimming — and keeps
 /// them glued to the pointer via global + local mouse monitors.
 ///
-/// The window is invisible to screen recordings, screenshots, and screen
-/// sharing because `sharingType = .none` excludes it from every capture path
+/// The windows are invisible to screen recordings, screenshots, and screen
+/// sharing because `sharingType = .none` excludes them from every capture path
 /// (CGWindowList, ScreenCaptureKit, the screenshot UI).
 ///
-/// One window spans the union of every screen rather than a small window that
-/// chases the cursor: the trail leaves marks behind the pointer and the
-/// spotlight dims everything around it, so both need a surface wider than the
-/// marker itself. Moving a layer inside a static window is also cheaper than
-/// moving the window on every mouse event.
+/// Each display gets one window covering its whole screen, rather than a small
+/// window that chases the cursor: the trail leaves marks behind the pointer and
+/// the spotlight dims everything around it, so both need a surface wider than
+/// the marker itself. Moving a layer inside a static window is also cheaper
+/// than moving the window on every mouse event. It's one window per display,
+/// not one spanning the whole desktop, because with "Displays have separate
+/// Spaces" on (the macOS default) a window can't span screens — it would only
+/// ever show on one of them.
 @MainActor
 final class OverlayController {
+    /// One display's overlay window and the view drawing into it.
+    private struct Surface {
+        let window: NSWindow
+        let view: OverlayView
+    }
+
     private let settings: SettingsStore
-    private let window: NSWindow
-    private let overlayView = OverlayView()
+    private var surfaces: [Surface] = []
     private var globalMonitors: [Any] = []
     private var localMonitor: Any?
     private var cancellables = Set<AnyCancellable>()
@@ -29,19 +37,7 @@ final class OverlayController {
 
     init(settings: SettingsStore) {
         self.settings = settings
-
-        window = NSWindow(contentRect: Self.desktopFrame(), styleMask: .borderless,
-                          backing: .buffered, defer: false)
-        window.isOpaque = false
-        window.backgroundColor = .clear
-        window.hasShadow = false
-        window.ignoresMouseEvents = true          // clicks pass straight through
-        window.level = .screenSaver               // above full-screen apps and the menu bar
-        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
-        window.sharingType = .none                // the whole trick: never captured
-        window.isReleasedWhenClosed = false
-        window.animationBehavior = .none
-        window.contentView = overlayView
+        surfaces = NSScreen.screens.map(Self.makeSurface(for:))
 
         applySettings()
         installMonitors()
@@ -51,57 +47,86 @@ final class OverlayController {
             .sink { [weak self] _ in self?.applySettings() }
             .store(in: &cancellables)
 
-        // Plugging in or rearranging a display changes the desktop union.
+        // Plugging in, removing, or rearranging a display: one surface per screen again.
         NotificationCenter.default.publisher(
             for: NSApplication.didChangeScreenParametersNotification)
-            .sink { [weak self] _ in self?.resizeToDesktop() }
+            .sink { [weak self] _ in self?.rebuildSurfaces() }
             .store(in: &cancellables)
     }
 
-    // MARK: - Geometry
+    // MARK: - Surfaces
 
-    /// The union of every screen, in Cocoa global coordinates.
-    private static func desktopFrame() -> NSRect {
-        NSScreen.screens.reduce(NSRect.zero) { $0.isEmpty ? $1.frame : $0.union($1.frame) }
+    private static func makeSurface(for screen: NSScreen) -> Surface {
+        let view = OverlayView()
+        let window = NSWindow(contentRect: screen.frame, styleMask: .borderless,
+                              backing: .buffered, defer: false)
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = false
+        window.ignoresMouseEvents = true          // clicks pass straight through
+        window.level = .screenSaver               // above full-screen apps and the menu bar
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+        window.sharingType = .none                // the whole trick: never captured
+        window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
+        window.contentView = view
+        window.setFrame(screen.frame, display: false)
+        return Surface(window: window, view: view)
     }
 
-    private func resizeToDesktop() {
-        window.setFrame(Self.desktopFrame(), display: true)
-        overlayView.updateScale(window.backingScaleFactor)
+    private func rebuildSurfaces() {
+        for surface in surfaces { surface.window.orderOut(nil) }
+        surfaces = NSScreen.screens.map(Self.makeSurface(for:))
         applySettings()
         followPointer()
     }
 
-    /// Global screen coordinates → the overlay view's own coordinate space.
-    private func viewPoint(_ global: NSPoint) -> CGPoint {
+    /// Global screen coordinates → a surface view's own coordinate space.
+    private static func viewPoint(_ global: NSPoint, in window: NSWindow) -> CGPoint {
         let origin = window.frame.origin
         return CGPoint(x: global.x - origin.x, y: global.y - origin.y)
     }
 
-    // MARK: - Settings → window
+    /// Every surface gets the pointer, including ones it isn't over: the
+    /// spotlight keeps dimming screens the pointer has left, and the marker and
+    /// trail carry straight across from one display to the next.
+    private func movePointer() {
+        let mouse = NSEvent.mouseLocation
+        for surface in surfaces {
+            surface.view.move(to: Self.viewPoint(mouse, in: surface.window))
+        }
+    }
+
+    // MARK: - Settings → windows
 
     private func applySettings() {
-        overlayView.updateScale(window.backingScaleFactor)
-        overlayView.configure(
-            style: settings.ringStyle,
-            diameter: CGFloat(settings.diameter),
-            thickness: CGFloat(settings.thickness),
-            color: settings.ringColor.nsColor,
-            markerOpacity: Float(settings.opacity),
-            markerVisible: settings.ringEnabled,
-            trailLength: settings.trailEnabled ? Int(settings.trailLength) : 0,
-            spotlight: settings.spotlightEnabled
-                ? OverlayView.Spotlight(radius: CGFloat(settings.spotlightRadius),
-                                        feather: CGFloat(settings.spotlightFeather),
-                                        dimming: Float(settings.spotlightDimming))
-                : nil)
+        let spotlight = settings.spotlightEnabled
+            ? OverlayView.Spotlight(radius: CGFloat(settings.spotlightRadius),
+                                    feather: CGFloat(settings.spotlightFeather),
+                                    dimming: Float(settings.spotlightDimming))
+            : nil
+        let visible = settings.ringEnabled || settings.spotlightEnabled
 
-        if settings.ringEnabled || settings.spotlightEnabled {
-            window.orderFrontRegardless()
-            overlayView.move(to: viewPoint(NSEvent.mouseLocation))
-        } else {
-            window.orderOut(nil)
+        for surface in surfaces {
+            // Per window: the built-in Retina display and an external one can
+            // differ, and each surface should render at its own screen's scale.
+            surface.view.updateScale(surface.window.backingScaleFactor)
+            surface.view.configure(
+                style: settings.ringStyle,
+                diameter: CGFloat(settings.diameter),
+                thickness: CGFloat(settings.thickness),
+                color: settings.ringColor.nsColor,
+                markerOpacity: Float(settings.opacity),
+                markerVisible: settings.ringEnabled,
+                trailLength: settings.trailEnabled ? Int(settings.trailLength) : 0,
+                spotlight: spotlight)
+            if visible {
+                surface.window.orderFrontRegardless()
+            } else {
+                surface.window.orderOut(nil)
+            }
         }
+        if visible { movePointer() }
 
         // A settings change counts as activity: un-fade and restart the clock.
         wake()
@@ -144,9 +169,7 @@ final class OverlayController {
 
     private func followPointer() {
         guard settings.ringEnabled || settings.spotlightEnabled else { return }
-        // NSEvent.mouseLocation is in global screen coordinates, which spans
-        // every attached display — so the marker follows across screens.
-        overlayView.move(to: viewPoint(NSEvent.mouseLocation))
+        movePointer()
         wake()
         scheduleIdleTimer()
     }
@@ -154,7 +177,8 @@ final class OverlayController {
     private func clickPulse() {
         guard settings.ringEnabled, settings.pulseOnClick else { return }
         followPointer()
-        overlayView.pulse()
+        // Only the surface under the pointer shows it; the rest pulse off-screen.
+        for surface in surfaces { surface.view.pulse() }
     }
 
     // MARK: - Idle auto-hide
@@ -176,13 +200,13 @@ final class OverlayController {
     private func fadeForIdle() {
         guard settings.idleHideEnabled, settings.ringEnabled else { return }
         idleHidden = true
-        overlayView.setMarkerFaded(true)
+        for surface in surfaces { surface.view.setMarkerFaded(true) }
     }
 
     private func wake() {
         guard idleHidden else { return }
         idleHidden = false
-        overlayView.setMarkerFaded(false)
+        for surface in surfaces { surface.view.setMarkerFaded(false) }
     }
 }
 

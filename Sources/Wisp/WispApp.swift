@@ -1,6 +1,7 @@
 import AppKit
 import Carbon
 import Combine
+import ShaferAccount
 import SwiftUI
 
 @main
@@ -39,6 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var boundSpotlightHotKey: KeyCombo?
 
     func applicationWillFinishLaunching(_ notification: Notification) {
+        ShaferAccount.configure(product: "wisp", name: "Wisp")
         // shafer.llc hands registration keys back as wisp://activate?…
         // Registering before launch finishes also catches a URL that launched
         // the app.
@@ -50,11 +52,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func handleGetURL(_ event: NSAppleEventDescriptor, withReply reply: NSAppleEventDescriptor) {
         guard let string = event.paramDescriptor(forKeyword: AEKeyword(keyDirectObject))?.stringValue,
               let url = URL(string: string) else { return }
-        LicenseModel.shared.handle(url)
-        // A menu-bar app has nothing on screen to show the result, so open
-        // Settings on the Account tab, where "Checking…" turns into "Registered".
-        UserDefaults.standard.set("account", forKey: "settingsTab")
-        settingsWindow?.show()
+        // Shows the Account window, where "Checking…" turns into "Registered" —
+        // a menu-bar app otherwise has nothing on screen to show the result.
+        ShaferAccount.handle(url)
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -70,7 +70,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         buildStatusItem()
         syncHotKeys()
-        LicenseModel.shared.startRechecking()
 
         settings.objectWillChange
             .receive(on: RunLoop.main)   // wait until the new value has landed
@@ -144,13 +143,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
 
-        let helpItem = NSMenuItem(title: "Wisp Help", action: #selector(openHelp(_:)), keyEquivalent: "")
-        helpItem.target = self
-        menu.addItem(helpItem)
-
-        let supportItem = NSMenuItem(title: "Contact Support…", action: #selector(contactSupport(_:)), keyEquivalent: "")
-        supportItem.target = self
-        menu.addItem(supportItem)
+        ShaferAccount.menuItems().forEach(menu.addItem)   // Account…, Wisp Help, Contact Support…
 
         menu.addItem(.separator())
 
@@ -208,21 +201,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func openSettings(_ sender: Any?) {
         settingsWindow.show()
-    }
-
-    @objc func openHelp(_ sender: Any?) {
-        NSWorkspace.shared.open(LicenseModel.site.appendingPathComponent("wisp/help"))
-    }
-
-    /// shafer.llc/support with Wisp preselected and the version filled in, so
-    /// the request says what it's about without the user typing it.
-    @objc func contactSupport(_ sender: Any?) {
-        let app = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
-        let os = ProcessInfo.processInfo.operatingSystemVersion
-        var c = URLComponents(url: LicenseModel.site.appendingPathComponent("support"), resolvingAgainstBaseURL: false)!
-        c.queryItems = [URLQueryItem(name: "product", value: "wisp"),
-                        URLQueryItem(name: "version", value: "\(app) · macOS \(os.majorVersion).\(os.minorVersion).\(os.patchVersion)")]
-        NSWorkspace.shared.open(c.url!)
     }
 
     /// A small template ring-with-dot mark for the menu bar.

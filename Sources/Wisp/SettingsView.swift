@@ -1,11 +1,11 @@
 import AppKit
 import Carbon.HIToolbox
+import ShaferAccount
 import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var store: SettingsStore
-    /// In UserDefaults so the app can open straight to a pane — the Account tab
-    /// after a registration handoff — by writing the key before showing.
+    /// In UserDefaults so the window reopens on the pane last shown.
     @AppStorage("settingsTab") private var tab = "ring"
 
     var body: some View {
@@ -25,7 +25,7 @@ struct SettingsView: View {
             GeneralSettings(store: store)
                 .tabItem { Label("General", systemImage: "gearshape") }
                 .tag("general")
-            AccountSettings()
+            AccountView()
                 .tabItem { Label("Account", systemImage: "person.crop.circle") }
                 .tag("account")
         }

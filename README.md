@@ -7,7 +7,7 @@ things — in the spirit of GhostCursor, but **free**. The ring glows around
 your pointer on every display, yet it never shows up in screenshots, screen
 recordings, or the screen you share on a call. Your audience sees a clean
 screen; you see exactly where your cursor is. Built the house way: SwiftUI +
-AppKit, SwiftPM, `make-app.sh`, no Xcode project, no external dependencies,
+AppKit, SwiftPM, `make-app.sh`, no Xcode project, no third-party dependencies,
 **no special permissions**.
 
 ## The trick
@@ -67,8 +67,10 @@ Open the first time.)
 Optional and free — every feature works without it. **Settings › Account ›
 Register…** opens shafer.llc; after you sign in, the site hands the key back to
 Wisp through `wisp://activate`, Wisp checks it with
-`shafer.llc/api/licenses/verify`, keeps it in the keychain, and opens the
-Account pane so you can see it took. There's also a field to paste a key. The
+`shafer.llc/api/licenses/verify`, keeps it in the keychain, and shows the
+Account window so you can see it took. There's also a field to paste a key. The
+registration code is Shafer LLC's own
+[ShaferAccount](https://github.com/shaferllc/swift-licensing), shared by its apps. The
 key and a one-way hash of the Mac's hardware ID are all that's sent.
 
 ## Build

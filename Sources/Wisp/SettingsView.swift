@@ -8,6 +8,10 @@ struct SettingsView: View {
     /// In UserDefaults so the window reopens on the pane last shown.
     @AppStorage("settingsTab") private var tab = "ring"
 
+    /// Wide enough for all six tabs in the toolbar. At 460, the last ones
+    /// folded behind a ">>" overflow button.
+    static let size = CGSize(width: 580, height: 430)
+
     var body: some View {
         TabView(selection: $tab) {
             RingSettings(store: store)
@@ -29,7 +33,7 @@ struct SettingsView: View {
                 .tabItem { Label("Account", systemImage: "person.crop.circle") }
                 .tag("account")
         }
-        .frame(width: 460, height: 430)
+        .frame(width: Self.size.width, height: Self.size.height)
     }
 }
 
@@ -476,7 +480,7 @@ final class SettingsWindowController {
             // frontmost app — follow the user to the active Space instead.
             w.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
             w.contentView = NSHostingView(rootView: SettingsView(store: store))
-            w.setContentSize(NSSize(width: 460, height: 430))
+            w.setContentSize(SettingsView.size)
             w.center()
             window = w
         }

@@ -144,6 +144,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
 
+        let helpItem = NSMenuItem(title: "Wisp Help", action: #selector(openHelp(_:)), keyEquivalent: "")
+        helpItem.target = self
+        menu.addItem(helpItem)
+
+        let supportItem = NSMenuItem(title: "Contact Support…", action: #selector(contactSupport(_:)), keyEquivalent: "")
+        supportItem.target = self
+        menu.addItem(supportItem)
+
+        menu.addItem(.separator())
+
         let quit = NSMenuItem(title: "Quit Wisp",
                               action: #selector(NSApplication.terminate(_:)),
                               keyEquivalent: "q")
@@ -198,6 +208,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func openSettings(_ sender: Any?) {
         settingsWindow.show()
+    }
+
+    @objc func openHelp(_ sender: Any?) {
+        NSWorkspace.shared.open(LicenseModel.site.appendingPathComponent("wisp/help"))
+    }
+
+    /// shafer.llc/support with Wisp preselected and the version filled in, so
+    /// the request says what it's about without the user typing it.
+    @objc func contactSupport(_ sender: Any?) {
+        let app = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+        let os = ProcessInfo.processInfo.operatingSystemVersion
+        var c = URLComponents(url: LicenseModel.site.appendingPathComponent("support"), resolvingAgainstBaseURL: false)!
+        c.queryItems = [URLQueryItem(name: "product", value: "wisp"),
+                        URLQueryItem(name: "version", value: "\(app) · macOS \(os.majorVersion).\(os.minorVersion).\(os.patchVersion)")]
+        NSWorkspace.shared.open(c.url!)
     }
 
     /// A small template ring-with-dot mark for the menu bar.
